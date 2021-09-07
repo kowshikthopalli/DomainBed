@@ -11,7 +11,7 @@ import numpy as np
 from domainbed import networks
 from domainbed.lib.misc import random_pairs_of_minibatches
 from domainbed.lib.misc import compare_models
-
+from domainbed.randconv import get_random_module
 ALGORITHMS = [
     'ERM',
     'IRM',
@@ -28,7 +28,8 @@ ALGORITHMS = [
     'VREx',
     'RSC',
     'SD',
-    'MULDENS'
+    'MULDENS',
+    'ERM_RC'
 ]
 
 def get_algorithm_class(algorithm_name):
@@ -96,6 +97,31 @@ class ERM(Algorithm):
 
     def predict(self, x):
         return self.network(x)
+
+
+class ERM_RC(ERM):
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(ERM_RC, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+        self.randconv_module = get_random_module()
+    
+    def update(self, minibatches, unlabeled=None):
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+        self.randconv_module.randomize()
+        all_x = self.randconv_module(all_x)
+        loss = F.cross_entropy(self.predict(all_x), all_y)
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        return {'loss': loss.item()}
+
+
+
+
+
+
 
 
 class ARM(ERM):
@@ -514,10 +540,8 @@ class MLDG(ERM):
 
 class MULDENS(ERM):
     """
-    Model-Agnostic Meta-Learning
-    Algorithm 1 / Equation (3) from: https://arxiv.org/pdf/1710.03463.pdf
-    Related: https://arxiv.org/pdf/1703.03400.pdf
-    Related: https://arxiv.org/pdf/1910.13580.pdf
+    our neurips submission
+    
     """
     def __init__(self, input_shape, num_classes, num_domains, hparams):
         super(MULDENS, self).__init__(input_shape, num_classes, num_domains,
@@ -540,6 +564,11 @@ class MULDENS(ERM):
             ) for network_i in self.MULDENS_networks]
         del self.network
         self.compute_train_beta = hparams['COMPUTE_BETA_TRAIN']
+        self.random_beta = False
+        self.beta_from_loss = False
+        self.use_all_batches_for_all_models=False
+
+
     def calculate_cosine_similarity_loss(self,list_gradients1,list_gradients2):
         cos = torch.nn.CosineSimilarity()
         cos_params = []
@@ -619,29 +648,70 @@ class MULDENS(ERM):
                     loss_i = F.cross_entropy(pred_i,val_minibatches[i][1])
                     grad_i = torch.autograd.grad(loss_i,self.MULDENS_networks[j].parameters(), allow_unused=True)
                     beta[j,i]= self.calculate_cosine_similarity_loss(inner_gradients_models[j],grad_i)
-            for i in range(self.num_models):
-                self.put_gradients(self.MULDENS_networks[i], inner_net_models[i],1)
+            
             models_selected = torch.argmax(beta,dim=0)
-        else:
+        elif self.random_beta:
 
             beta= torch.zeros((self.num_models, len(val_minibatches)))
             models_selected = torch.randint(self.num_models,(len(val_minibatches),))
+        elif self.beta_from_loss:
+
+            beta = torch.zeros((self.num_models, len(val_minibatches)))
+            for j in range(self.num_models):
+                for i in range(len(val_minibatches)):
+                    pred_i = self.MULDENS_networks[j](val_minibatches[i][0])
+                    loss_i = F.cross_entropy(pred_i,val_minibatches[i][1])
+                    beta[j,i]= loss_i.item()
+
+            models_selected = torch.argmax(beta,dim=0)
+
+        
+        else:
+            pass
+
+        for i in range(self.num_models):
+                self.put_gradients(self.MULDENS_networks[i], inner_net_models[i],1)
+
+
         # torch.nn.ModuleList([ self.put_gradients(self.MULDENS_networks[i], inner_net_models[i],1)\
         #     for i in range(self.num_models)])
         # beta is say 2*3. take argmax along the columns. 
         #models_selected_for_each_domain
+        if self.use_all_batches_for_all_models:
+            for model_selected in range(self.num_models):
+                for i in range(len(val_minibatches)):
+                    #model_selected = models_selected[i]
+                    pred_i= inner_net_models[model_selected](val_minibatches[i][0])
+                    loss_i = F.cross_entropy(pred_i, val_minibatches[i][1])
+                    grad_i = torch.autograd.grad( loss_i, inner_net_models[model_selected].parameters(),allow_unused=True)
+                    objective += self.hparams['MULDENS_beta']*loss_i.item()
 
-        for i in range(len(val_minibatches)):
-            model_selected = models_selected[i]
-            pred_i= inner_net_models[model_selected](val_minibatches[i][0])
-            loss_i = F.cross_entropy(pred_i, val_minibatches[i][1])
-            grad_i = torch.autograd.grad( loss_i, inner_net_models[model_selected].parameters(),allow_unused=True)
-            objective += self.hparams['MULDENS_beta']*loss_i.item()
+                    for p, g_j in zip(self.MULDENS_networks[model_selected].parameters(), grad_i):
+                        if g_j is not None:
+                            p.grad.data.add_(
+                                self.hparams['MULDENS_beta'] * g_j.data )
+            """
+            below two lines are just to handle the return values of this function, no significance"
+            """                     
+            beta= torch.zeros((self.num_models, len(val_minibatches)))
+            models_selected = torch.randint(self.num_models,(len(val_minibatches),))
+        else:
+            for i in range(len(val_minibatches)):
+                model_selected = models_selected[i]
+                pred_i= inner_net_models[model_selected](val_minibatches[i][0])
+                loss_i = F.cross_entropy(pred_i, val_minibatches[i][1])
+                grad_i = torch.autograd.grad( loss_i, inner_net_models[model_selected].parameters(),allow_unused=True)
+                objective += self.hparams['MULDENS_beta']*loss_i.item()
 
-            for p, g_j in zip(self.MULDENS_networks[model_selected].parameters(), grad_i):
-                if g_j is not None:
-                    p.grad.data.add_(
-                        self.hparams['MULDENS_beta'] * g_j.data )
+                for p, g_j in zip(self.MULDENS_networks[model_selected].parameters(), grad_i):
+                    if g_j is not None:
+                        p.grad.data.add_(
+                            self.hparams['MULDENS_beta'] * g_j.data )
+
+
+
+
+
         
 
         [optim_i.step() for optim_i in self.MULDENS_network_optimizers]
