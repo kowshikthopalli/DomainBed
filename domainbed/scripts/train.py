@@ -26,7 +26,7 @@ if __name__ == "__main__":
     parser.add_argument('--data_dir', type=str,default= 'DATA')
     parser.add_argument('--csv_root', type= str,default= 'PACS_splits/sketch/seed_334')
     parser.add_argument('--dataset', type=str, default="OfficeHome")
-    parser.add_argument('--algorithm', type=str, default="INVENIO")
+    parser.add_argument('--algorithm', type=str, default="ERM")
     parser.add_argument('--task', type=str, default="domain_generalization",
         help='domain_generalization | domain_adaptation')
     parser.add_argument('--hparams', type=str,default= '{"batch_size":32,"data_augmentation":1, "lr_invenio":5e-5}',
