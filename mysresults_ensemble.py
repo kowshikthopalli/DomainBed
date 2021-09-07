@@ -2,12 +2,21 @@ import pandas as pd
 import numpy as np
 
 total_domains = 4
-ENSEMBLE_OBS=True
-if ENSEMBLE_OBS:
+
+ONLY_ENSEMBLE_OBS=False
+
+
+
+
+
+       
+
+if ONLY_ENSEMBLE_OBS:
 
     for test_env in range(total_domains):
 
         out_file = 'Inevnio_withoutaug/VLCS_M3/env'+str(test_env)+'/indiv_ensemble_no_beta/out_eval copy.txt'
+        
         out_df = pd.read_fwf(out_file)
 
         train_envs = np.setdiff1d(np.arange(total_domains),test_env)
