@@ -224,11 +224,9 @@ class MultipleEnvironmentImageFolder(MultipleDomainDataset):
     1. hparams['data_augmentation'] - this param is for applying the DomainBed;s augmentations in in/train splits
     of observed domains
     2. out_augs- this is for defining our own augmentations for the observed domains
-    We have observed, not too surprisingly that applying both (as 2 is a subset of 1) our version of ERM++ didnt improve results
-    
-    We want to also experiment without 1 and only two.
+ 
 
-    Ofcourse now augmentation at all for the test envs.
+    Ofcourse no augmentation at all for the test envs.
 
     """
 
