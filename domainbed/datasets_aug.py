@@ -11,8 +11,8 @@ from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 from torchvision import transforms
 from torchvision.datasets import MNIST, ImageFolder
 from torchvision.transforms.functional import rotate
-# from wilds.datasets.camelyon17_dataset import Camelyon17Dataset
-# from wilds.datasets.fmow_dataset import FMoWDataset
+from wilds.datasets.camelyon17_dataset import Camelyon17Dataset
+from wilds.datasets.fmow_dataset import FMoWDataset
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -87,7 +87,7 @@ class myImageList(Dataset):
 
 class MultipleDomainDataset:
     N_STEPS = 5001           # Default, subclasses may override
-    CHECKPOINT_FREQ = 100    # Default, subclasses may override
+    CHECKPOINT_FREQ = 300    # Default, subclasses may override
     N_WORKERS = 8           # Default, subclasses may override
     ENVIRONMENTS = None      # Subclasses should override
     INPUT_SHAPE = None       # Subclasses should override
@@ -436,20 +436,23 @@ class WILDSEnvironment:
 
 
 class WILDSDataset(MultipleDomainDataset):
-    INPUT_SHAPE = (3, 224, 224)
-    def __init__(self, dataset, metadata_name, test_envs, augment, hparams):
+    Himg=96
+    Wimg=96
+    INPUT_SHAPE = (3, Himg, Wimg)
+    def __init__(self, dataset, metadata_name, test_envs, augment, hparams,out_augs = False):
         super().__init__()
-
+        Himg=96
+        Wimg=96
         transform = transforms.Compose([
-            transforms.Resize((224, 224)),
+            transforms.Resize((Himg,Wimg)),
             transforms.ToTensor(),
             transforms.Normalize(
                 mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
 
         augment_transform = transforms.Compose([
-            transforms.Resize((224, 224)),
-            transforms.RandomResizedCrop(224, scale=(0.7, 1.0)),
+            transforms.Resize((Himg,Wimg)),
+            transforms.RandomResizedCrop(Himg, scale=(0.7, 1.0)),
             transforms.RandomHorizontalFlip(),
             transforms.ColorJitter(0.3, 0.3, 0.3, 0.3),
             transforms.RandomGrayscale(),
@@ -457,23 +460,55 @@ class WILDSDataset(MultipleDomainDataset):
             transforms.Normalize(
                 mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ])
+        augment_transform1 = transforms.Compose([
+        transforms.Resize((Himg,Wimg)),
+        transforms.RandomHorizontalFlip(1.),
+        transforms.ColorJitter(0.3, 0.3, 0.3, 0.3),
+        transforms.ToTensor(),
+        transforms.Normalize(
+            mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),])
+
+        augment_transform2 = transforms.Compose([
+        transforms.Resize((Himg,Wimg)),
+        transforms.ColorJitter(0.3, 0.3, 0.3, 0.3),
+        transforms.RandomGrayscale(1.),
+        transforms.ToTensor(),
+        transforms.Normalize(
+            mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),])
+
+            
 
         self.datasets = []
 
         for i, metadata_value in enumerate(
                 self.metadata_values(dataset, metadata_name)):
-            if augment and (i not in test_envs):
-                env_transform = augment_transform
-            else:
+            
+            if i in test_envs:
                 env_transform = transform
-
-            env_dataset = WILDSEnvironment(
+                env_dataset = WILDSEnvironment(
                 dataset, metadata_name, metadata_value, env_transform)
+                self.datasets.append([env_dataset])
+                self.num_classes= dataset.n_classes
+            else : # for train envs
+                if augment:
+                    to_append=[]
+                    env_dataset = WILDSEnvironment(
+                dataset, metadata_name, metadata_value, augment_transform)
+                    to_append.append(env_dataset)
+                    if out_augs:
+                        env_dataset1 = WILDSEnvironment(
+                                        dataset, metadata_name, metadata_value, augment_transform1)
+                        env_dataset2 = WILDSEnvironment(
+                                        dataset, metadata_name, metadata_value, augment_transform2)
 
-            self.datasets.append(env_dataset)
+                        to_append.append(env_dataset1)
+                        to_append.append(env_dataset2)
+                self.datasets.append(to_append)
+            
+            
 
-        self.input_shape = (3, 224, 224,)
-        self.num_classes = dataset.n_classes
+        self.input_shape = (3, Himg, Wimg,)
+        #self.num_classes = dataset.n_classes
 
     def metadata_values(self, wilds_dataset, metadata_name):
         metadata_index = wilds_dataset.metadata_fields.index(metadata_name)
@@ -484,10 +519,10 @@ class WILDSDataset(MultipleDomainDataset):
 class WILDSCamelyon(WILDSDataset):
     ENVIRONMENTS = [ "hospital_0", "hospital_1", "hospital_2", "hospital_3",
             "hospital_4"]
-    def __init__(self, root, test_envs, hparams):
+    def __init__(self, root, test_envs, hparams,out_augs):
         dataset = Camelyon17Dataset(root_dir=root)
         super().__init__(
-            dataset, "hospital", test_envs, hparams['data_augmentation'], hparams)
+            dataset, "hospital", test_envs, hparams['data_augmentation'], hparams,out_augs)
 
 
 class WILDSFMoW(WILDSDataset):
@@ -497,3 +532,4 @@ class WILDSFMoW(WILDSDataset):
         dataset = FMoWDataset(root_dir=root)
         super().__init__(
             dataset, "region", test_envs, hparams['data_augmentation'], hparams)
+
