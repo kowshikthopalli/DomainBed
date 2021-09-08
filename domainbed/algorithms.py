@@ -12,6 +12,7 @@ from domainbed import networks
 from domainbed.lib.misc import random_pairs_of_minibatches
 from domainbed.lib.misc import compare_models
 from domainbed.randconv import get_random_module
+from domainbed.scripts.resnet_dson import resnet50
 ALGORITHMS = [
     'ERM',
     'IRM',
@@ -29,9 +30,22 @@ ALGORITHMS = [
     'RSC',
     'SD',
     'MULDENS',
-    'ERM_RC'
+    'ERM_RC',
+    'DSON'
 ]
+def inv_lr_scheduler(param_lr, optimizer, iter_num, gamma, power, init_lr=0.001):
+    """Decay learning rate by a factor of 0.1 every lr_decay_epoch epochs."""
+    lr = init_lr * (1 + gamma * iter_num) ** (-power)
 
+    i=0
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr * param_lr[i]
+        i+=1
+
+    return optimizer
+
+
+#schedule_dict = {"inv":inv_lr_scheduler}
 def get_algorithm_class(algorithm_name):
     """Return the algorithm class with the given name."""
     if algorithm_name not in globals():
@@ -419,6 +433,44 @@ class GroupDRO(ERM):
         self.optimizer.step()
 
         return {'loss': loss.item()}
+
+class DSON(ERM):
+    """
+    our neurips submission
+    
+    """
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(DSON, self).__init__(input_shape, num_classes, num_domains,
+                                   hparams)
+        del self.featurizer,self.classifier,self.network
+        self.network = resnet50(True,input_channels =3,num_domains=num_domains,num_classes= num_classes )
+        
+
+        self.optimizer = torch.optim.Adam(
+            self.network.parameters(),
+            lr=self.hparams["lr_DSON"],
+            weight_decay=self.hparams['weight_decay']
+        )
+
+        #self.optimizer = torch.optim.SGD(self.network.parameters(),lr = self.hparams["lr_DSON"],momentum =0.9)
+
+
+        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer,gamma =0.9, step_size =100)
+    def update(self, minibatches, unlabeled=None):
+        self.network.train()
+        loss =0
+        for i in range(len(minibatches)):
+            x, y = minibatches[i]
+            
+            logits = self.network(x,domain_label=i)
+
+            loss += F.cross_entropy(logits, y)
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        self.scheduler.step()
+        return {'loss': loss.item()}
+
 
 
 class MLDG(ERM):

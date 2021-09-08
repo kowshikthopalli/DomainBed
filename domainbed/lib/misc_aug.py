@@ -128,7 +128,7 @@ def ensemble_accuracy(networks, loader, weights, device):
                 weights_offset += len(x)
             batch_weights = batch_weights.to(device)
             if p_mean.size(1) == 1:
-                correct += (p_mean_mean.gt(0).eq(y).float() * batch_weights.view(-1, 1)).sum().item()
+                correct += (p_mean.gt(0).eq(y).float() * batch_weights.view(-1, 1)).sum().item()
             else:
                 correct += (p_mean.argmax(1).eq(y).float() * batch_weights).sum().item()
             total += batch_weights.sum().item()

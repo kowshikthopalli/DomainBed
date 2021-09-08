@@ -373,11 +373,11 @@ class PACS_splits(MultipleEnvironmentImageLIST):
         super().__init__(csv_root,self.dir, test_envs, hparams['data_augmentation'], hparams)
 
 class DomainNet(MultipleEnvironmentImageFolder):
-    CHECKPOINT_FREQ = 1000
+    CHECKPOINT_FREQ = 300
     ENVIRONMENTS = ["clip", "info", "paint", "quick", "real", "sketch"]
-    def __init__(self, root, test_envs, hparams):
+    def __init__(self, root, test_envs, hparams,out_augs):
         self.dir = os.path.join(root, "domain_net/")
-        super().__init__(self.dir, test_envs, hparams['data_augmentation'], hparams)
+        super().__init__(self.dir, test_envs, hparams['data_augmentation'], hparams,out_augs)
 
 class OfficeHome(MultipleEnvironmentImageFolder):
     CHECKPOINT_FREQ = 300

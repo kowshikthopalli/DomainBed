@@ -25,7 +25,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Domain generalization')
     parser.add_argument('--data_dir', type=str,default= 'DATA')
     parser.add_argument('--csv_root', type= str,default= 'PACS_splits/sketch/seed_12')
-    parser.add_argument('--dataset', type=str, default="PACS")
+    parser.add_argument('--dataset', type=str, default="DomainNet")
     parser.add_argument('--algorithm', type=str, default="MULDENS")
     parser.add_argument('--task', type=str, default="domain_generalization",
         help='domain_generalization | domain_adaptation')
@@ -47,7 +47,7 @@ if __name__ == "__main__":
     parser.add_argument('--holdout_fraction', type=float, default=0.2)
     parser.add_argument('--uda_holdout_fraction', type=float, default=0)
     parser.add_argument('--skip_model_save', action='store_true')
-    parser.add_argument('--save_model_every_checkpoint', action='store_true',default=False)
+    parser.add_argument('--save_model_every_checkpoint', action='store_true',default=True)
     parser.add_argument('--compute_test_beta_MULDENS',default=False)
     parser.add_argument('--out_augs',default=True, help = "augmentations for out splits of observed domains")
     parser.add_argument('--split_indata',default=True,help="create held out validation \
@@ -369,7 +369,7 @@ if __name__ == "__main__":
                     eval_dict[name]= [loader,weights]
                 
                 train_envs = [ i for i in range(len(dataset)) if i not in args.test_envs]
-                test_out_split_idx = args.test_envs[0] * len(train_envs)
+                test_out_split_idx = args.test_envs[0] * 3 #because three number of augmentations#len(train_envs)
                 models_selected = step_vals['models_selected']
                 
                 # correct_models_selected_for_each_domain = np.nan* np.ones(len(eval_loaders)-(len(train_envs)+len(args.test_envs)))
