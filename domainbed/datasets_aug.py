@@ -11,8 +11,8 @@ from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 from torchvision import transforms
 from torchvision.datasets import MNIST, ImageFolder
 from torchvision.transforms.functional import rotate
-from wilds.datasets.camelyon17_dataset import Camelyon17Dataset
-from wilds.datasets.fmow_dataset import FMoWDataset
+# from wilds.datasets.camelyon17_dataset import Camelyon17Dataset
+# from wilds.datasets.fmow_dataset import FMoWDataset
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -33,7 +33,10 @@ DATASETS = [
     "PACS_splits",
     # WILDS datasets
     "WILDSCamelyon",
-    "WILDSFMoW"
+    "WILDSFMoW",
+    "CIFAR100Splits",
+    "CIFAR10Splits",
+    "ImageNet"
 ]
 
 def get_dataset_class(dataset_name):
@@ -215,6 +218,94 @@ class RotatedMNIST(MultipleEnvironmentMNIST):
         y = labels.view(-1)
 
         return TensorDataset(x, y)
+
+class MultipleEnvironmentCIFAR(MultipleDomainDataset):
+    def __init__(self, root, environments, dataset_transform, input_shape,
+                 num_classes,cifar100=False,out_augs = True):
+        super().__init__()
+        if root is None:
+            raise ValueError('Data directory not specified!')
+        train_transform = transforms.Compose([
+            transforms.RandomCrop(32, padding=4),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[0.4914, 0.4822, 0.4465],
+                std=[0.2023, 0.1994, 0.2010]),
+        ])  
+        test_transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[0.4914, 0.4822, 0.4465],
+                std=[0.2023, 0.1994, 0.2010]),
+        ])
+
+
+        augment_transform1 =train_transform
+        augment_transform2 = train_transform
+            
+
+        if cifar100:
+            original_dataset_tr = torchvision.datasets.CIFAR100(root, train=True,transform=train_transform, download=True)
+            original_dataset_te = torchvision.datasets.CIFAR100(root, train=False, transform=test_transform, download=False)
+        else:
+            print('here in cifar10')
+            original_dataset_tr = torchvision.datasets.CIFAR10(root, train=True, transform=train_transform, download=True)
+            original_dataset_te = torchvision.datasets.CIFAR10(root, train=False, transform=test_transform, download=False)
+        
+        num_train= len(original_dataset_tr.data)
+
+        g_cpu = torch.Generator()
+        g_cpu.manual_seed(42)
+        total_indices =  torch.randperm(num_train, generator=g_cpu)
+        total_indices = total_indices.tolist()
+        split_size = num_train // 4 # 50000/4 = 12500
+        np.random.seed(42)
+
+        total_indices_all = [total_indices[i:i+split_size] for i in range(0, len(total_indices), split_size)]
+        
+        
+        self.datasets=[]
+        for i in range(len(environments)-1):
+            
+            to_append =[]
+            to_append.append(torch.utils.data.Subset(original_dataset_tr, total_indices_all[i]))
+            if out_augs:
+                to_append.append(torch.utils.data.Subset(original_dataset_tr, total_indices_all[i]))
+                to_append.append(torch.utils.data.Subset(original_dataset_tr, total_indices_all[i]))
+            self.datasets.append(to_append)
+
+
+
+
+
+        # for i in range(len(environments)-1):
+        #     print("env",i)
+        #     self.datasets.append(torch.utils.data.Subset(original_dataset_tr, total_indices_all[i]))
+        self.datasets.append([original_dataset_te])
+
+        self.input_shape = input_shape
+        self.num_classes = num_classes
+    
+class CIFAR100Splits(MultipleEnvironmentCIFAR):
+    ENVIRONMENTS = ['0', '1', '2', '3','4']
+    def __init__(self, root, test_envs, hparams,out_augs):
+        super(CIFAR100Splits, self).__init__(root, ['0', '1', '2', '3','4'], None,
+                                            (3, 32,32,), 100,cifar100=True,out_augs=out_augs)
+        self.N_STEPS = 300001
+        self.CHECKPOINT_FREQ=300
+        self.input_shape = (3, 32,32,)
+        self.num_classes = 100        
+class CIFAR10Splits(MultipleEnvironmentCIFAR):
+    ENVIRONMENTS = ['0', '1', '2', '3','4']
+    def __init__(self, root, test_envs, hparams,out_augs):
+
+        super(CIFAR10Splits, self).__init__(root, ['0', '1', '2', '3','4'], None,
+                                            (3, 32,32,), 10,cifar100=False,out_augs=out_augs)
+        self.N_STEPS = 30001
+        self.CHECKPOINT_FREQ=300
+        self.input_shape =  (3, 32,32,)
+        self.num_classes = 10        
 
 
 class MultipleEnvironmentImageFolder(MultipleDomainDataset):

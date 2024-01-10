@@ -12,9 +12,10 @@ from domainbed import networks
 from domainbed.lib.misc import random_pairs_of_minibatches
 from domainbed.lib.misc import compare_models
 from domainbed.randconv import get_random_module
-from domainbed.scripts.resnet_dson import resnet50
+#from domainbed.scripts.resnet_dson import resnet50
 ALGORITHMS = [
     'ERM',
+    'ERMEnsemble',
     'IRM',
     'GroupDRO',
     'Mixup',
@@ -85,11 +86,9 @@ class ERM(Algorithm):
     def __init__(self, input_shape, num_classes, num_domains, hparams):
         super(ERM, self).__init__(input_shape, num_classes, num_domains,
                                   hparams)
+        
         self.featurizer = networks.Featurizer(input_shape, self.hparams)
-        self.classifier = networks.Classifier(
-            self.featurizer.n_outputs,
-            num_classes,
-            self.hparams['nonlinear_classifier'])
+        self.classifier = networks.Classifier(self.featurizer.n_outputs,num_classes,self.hparams['nonlinear_classifier'])
 
         self.network = nn.Sequential(self.featurizer, self.classifier)
         self.optimizer = torch.optim.Adam(
@@ -101,6 +100,7 @@ class ERM(Algorithm):
     def update(self, minibatches, unlabeled=None):
         all_x = torch.cat([x for x,y in minibatches])
         all_y = torch.cat([y for x,y in minibatches])
+
         loss = F.cross_entropy(self.predict(all_x), all_y)
 
         self.optimizer.zero_grad()
@@ -111,6 +111,61 @@ class ERM(Algorithm):
 
     def predict(self, x):
         return self.network(x)
+
+class ERMEnsemble(Algorithm):
+    """
+    jointly train multiple ERM models
+    """
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(ERMEnsemble, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+        self.num_models= hparams['ERMEnsemble_num_models']
+        self.num_classes= num_classes
+        self.featurizer = networks.Featurizer(input_shape, self.hparams)
+        self.classifiers = torch.nn.ModuleList([networks.Classifier(
+                            self.featurizer.n_outputs,
+                            self.num_classes,
+                            self.hparams['nonlinear_classifier']) for _ in range(self.num_models)])
+        if self.hparams['ERMEnsemble_random_init_feat']:
+            # even change the featurizer- notice that copy.deepcopy is gone.
+            self.networks = torch.nn.ModuleList(\
+                                                [nn.Sequential(networks.Featurizer(input_shape, self.hparams),classifier_i) \
+                                                for classifier_i in self.classifiers]\
+                                                )
+        else:
+            self.networks = torch.nn.ModuleList(\
+                                                [nn.Sequential(copy.deepcopy(self.featurizer),classifier_i) \
+                                                for classifier_i in self.classifiers]\
+                                                )
+        self.optimizers =[ torch.optim.Adam(
+                network_i.parameters(),
+                lr=self.hparams["lr"],
+                weight_decay=self.hparams['weight_decay']
+            ) for network_i in self.networks]
+        
+
+    def update(self, minibatches, unlabeled=None):
+        all_x = torch.cat([x for x,y in minibatches])
+        all_y = torch.cat([y for x,y in minibatches])
+        objective = 0
+        
+        [self.optimizers[i].zero_grad() for i in range(len(self.networks))]
+
+
+        inner_predictions = [network_i(all_x) for network_i in self.networks]
+        inner_predictions = torch.stack(inner_predictions)
+        inner_predictions = torch.mean(inner_predictions,dim=0)
+        loss = F.cross_entropy(inner_predictions,all_y)
+        loss.backward()
+        [self.optimizers[i].step() for i in range(len(self.networks))]
+        objective += loss.item()
+        return {'loss': objective/self.num_models}
+
+    def predict(self, x):
+        predictions = [network_i(x) for network_i in self.networks]
+        predictions = torch.stack(predictions)
+        predictions = torch.mean(predictions,dim=0)
+        return predictions
 
 
 class ERM_RC(ERM):
@@ -601,14 +656,21 @@ class MULDENS(ERM):
         self.num_models= hparams['MULDENS_num_models']
         self.num_classes= num_classes
         
-       
+        
         self.classifiers = torch.nn.ModuleList([networks.Classifier(
                             self.featurizer.n_outputs,
                             self.num_classes,
                             self.hparams['nonlinear_classifier']) for _ in range(self.num_models)])
         # verify that they are different 
-        self.MULDENS_networks= torch.nn.ModuleList([nn.Sequential(copy.deepcopy(self.featurizer),classifier_i) \
-            for classifier_i in self.classifiers])
+        if hparams['MULDENS_random_init_feat']:
+            
+        
+            self.MULDENS_networks= torch.nn.ModuleList([nn.Sequential(networks.Featurizer(input_shape, self.hparams),classifier_i) \
+                                                        for classifier_i in self.classifiers])
+            
+        else:   
+            self.MULDENS_networks= torch.nn.ModuleList([nn.Sequential(copy.deepcopy(self.featurizer),classifier_i) \
+                    for classifier_i in self.classifiers])
         self.MULDENS_network_optimizers =[ torch.optim.Adam(
                 network_i.parameters(),
                 lr=self.hparams["lr_MULDENS"],
@@ -619,6 +681,7 @@ class MULDENS(ERM):
         self.random_beta = False
         self.beta_from_loss = False
         self.use_all_batches_for_all_models=False
+        self.inner_joint_training = hparams['MULDENS_inner_joint_training']
 
 
     def calculate_cosine_similarity_loss(self,list_gradients1,list_gradients2):
@@ -651,10 +714,12 @@ class MULDENS(ERM):
 
         For computational efficiency, we do not compute second derivatives.
         """
+
         num_mb = len(minibatches)
         objective = 0
         device = "cuda" if minibatches[0][0].is_cuda else "cpu"
-  
+        
+
         [optim_i.zero_grad() for optim_i in self.MULDENS_network_optimizers]
         for network_i in self.MULDENS_networks:
             for p in network_i.parameters():
@@ -668,25 +733,52 @@ class MULDENS(ERM):
         
         # verify that they are different 
         
-        
+
         inner_net_models= torch.nn.ModuleList([copy.deepcopy(network_i) for network_i in self.MULDENS_networks])
         inner_opts = [torch.optim.Adam(
                 inner_net_i.parameters(),
                 lr=self.hparams["lr_MULDENS"],
                 weight_decay=self.hparams['weight_decay']
             ) for inner_net_i in inner_net_models]
-        inner_objs= [F.cross_entropy(inner_net_i(all_x), all_y) for inner_net_i in inner_net_models]
-        objective += sum(inner_objs).item()
-        for i in range(self.num_models):
-            inner_opts[i].zero_grad()
-            inner_objs[i].backward()
-            inner_opts[i].step()
+        if self.inner_joint_training:
+            
+            #conventional ensemble. that is take predictions of each model; average them and then comput one single loss
+            inner_predictions = [inner_net_i(all_x) for inner_net_i in inner_net_models]
+            inner_predictions = torch.stack(inner_predictions)
+            inner_predictions = torch.mean(inner_predictions,dim=0)
+            inner_loss = F.cross_entropy(inner_predictions,all_y)
+            objective += inner_loss.item()
 
+            [inner_opts[i].zero_grad() for i in range(self.num_models)]
+            inner_loss.backward()
+            [inner_opts[i].step() for i in range(self.num_models)]
+
+
+        else:
+            #inner_objs= [F.cross_entropy(inner_net_i(all_x), all_y) for inner_net_i in inner_net_models]
+
+            objective =0.0
+            for i in range(self.num_models):
+                
+
+                inner_opts[i].zero_grad()
+                inner_obj = F.cross_entropy(inner_net_models[i](all_x), all_y)
+
+                inner_obj.backward()
+                
+                inner_opts[i].step()
+                objective += inner_obj.item()
+        
+        
         inner_gradients_models=[]
-        for inner_net_model_i in inner_net_models:
+        
+        for i,inner_net_model_i in enumerate(inner_net_models):
+   
             inner_net_gradients=[]
-            for p in inner_net_model_i.parameters():
-                inner_net_gradients.append(p.grad.data)
+            for param in inner_net_model_i.parameters():
+                if param.grad is not None:
+                    inner_net_gradients.append(param.grad.data)
+            
             inner_gradients_models.append(inner_net_gradients)
      
         
@@ -770,8 +862,8 @@ class MULDENS(ERM):
 
         return {'loss': objective/num_mb,'models_selected':models_selected.cpu().numpy(),'betas':beta.cpu().numpy() }
         
-
-
+# for name,param in inner_net_models[0].named_parameters(): print(name,param.grad)
+# for param in self.MULDENS_networks[1].parameters(): print(param.grad.data.sum()); break
 
 
 class AbstractMMD(ERM):
@@ -1130,3 +1222,7 @@ class SD(ERM):
         self.optimizer.step()
 
         return {'loss': loss.item(), 'penalty': penalty.item()}
+
+
+if __name__=='__main__':
+    hparams= {""}

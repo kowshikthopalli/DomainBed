@@ -12,3 +12,11 @@ domainbed/facebook.py
 *.sh
 *.gz
 *-ubyte
+*.txt
+*.pth
+*.out
+data_batch*
+*.ckpt
+*.bsub
+DATA/*
+*.tar

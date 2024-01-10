@@ -189,6 +189,38 @@ def accuracy(network, loader, weights, device):
 
     return correct / total
 
+
+def myensemble_accuracy(networks, loader, weights, device,avg_after_softmax=False):
+    correct = 0
+    total = 0
+    weights_offset = 0
+
+    [network.eval() for network in networks]
+    with torch.no_grad():
+        for x, y in loader:
+            x = x.to(device)
+            y = y.to(device)
+            predictions = [network.predict(x) for network in networks]
+            
+            if avg_after_softmax:
+                predictions = [torch.softmax(j,dim=1) for j in predictions]
+            predictions = torch.mean(torch.stack(predictions),dim =0)
+
+            if weights is None:
+                batch_weights = torch.ones(len(x))
+            else:
+                batch_weights = weights[weights_offset : weights_offset + len(x)]
+                weights_offset += len(x)
+            batch_weights = batch_weights.to(device)
+            if predictions.size(1) == 1:
+                correct += (predictions.gt(0).eq(y).float() * batch_weights.view(-1, 1)).sum().item()
+            else:
+                correct += (predictions.argmax(1).eq(y).float() * batch_weights).sum().item()
+            total += batch_weights.sum().item()
+    [network.train() for network in networks]
+
+    return correct / total
+
 def calculate_cosine_similarity_loss(list_gradients1,list_gradients2):
     cos = torch.nn.CosineSimilarity()
     cos_params = []

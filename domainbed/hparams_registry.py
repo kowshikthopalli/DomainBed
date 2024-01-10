@@ -12,7 +12,7 @@ def _hparams(algorithm, dataset, random_seed):
     Global registry of hyperparams. Each entry is a (default, random) tuple.
     New algorithms / networks / etc. should add entries here.
     """
-    SMALL_IMAGES = ['Debug28', 'RotatedMNIST', 'ColoredMNIST']
+    SMALL_IMAGES = ['Debug28', 'RotatedMNIST', 'ColoredMNIST','CIFAR100Splits','CIFAR10Splits']
 
     hparams = {}
     def _hparam(name, default_val, random_val_fn):
@@ -28,6 +28,8 @@ def _hparams(algorithm, dataset, random_seed):
 
     _hparam('data_augmentation', True, lambda r: True)
     _hparam('resnet18', False, lambda r: False)
+    _hparam('pretrained', True, lambda r: True)
+    _hparam('freeze_batchnorm',True, lambda r: True)
     _hparam('resnet_dropout', 0., lambda r: r.choice([0., 0.1, 0.5]))
     _hparam('class_balanced', False, lambda r: False)
     _hparam('nonlinear_classifier', False, lambda r: bool(r.choice([False, True])))
@@ -79,6 +81,7 @@ def _hparams(algorithm, dataset, random_seed):
         _hparam('sd_reg', 0.1, lambda r: 10**r.uniform(-5, -1))
     elif algorithm == "MULDENS":
         _hparam('MULDENS_beta',1.,lambda r: 10**r.uniform(-1, 1))
+        
 
     # Dataset-and-algorithm-specific hparam definitions. Each block of code
     # below corresponds to exactly one hparam. Avoid nested conditionals.
@@ -115,7 +118,14 @@ def _hparams(algorithm, dataset, random_seed):
         _hparam('lr_d', 1e-3, lambda r: 10**r.uniform(-4.5, -2.5) )
     elif algorithm in ['DANN', 'CDANN']:
         _hparam('lr_d', 5e-5, lambda r: 10**r.uniform(-5, -3.5) )
-
+    if algorithm in ['ERMEnsemble'] and dataset in SMALL_IMAGES:
+        _hparam('lr_ERMEnsemble', 1e-3, lambda r: 10**r.uniform(-4.5, -2.5) )
+    elif algorithm in ['ERMEnsemble']:
+        _hparam('lr_ERMEnsemble', 5e-5, lambda r: 10**r.uniform(-5, -3.5) )
+    
+    if algorithm in ['ERMEnsemble']:
+        _hparam('ERMEnsemble_num_models',3, lambda r: r.randint(3,size=1))
+        _hparam('ERMEnsemble_random_init_feat',False, lambda r: r.randint(2,size=1))
 
     if algorithm in ['DANN', 'CDANN'] and dataset in SMALL_IMAGES:
         _hparam('weight_decay_g', 0., lambda r: 0.)
@@ -127,6 +137,8 @@ def _hparams(algorithm, dataset, random_seed):
         _hparam('lr_MULDENS', 5e-5, lambda r: 10**r.uniform(-5, -3.5))
     if algorithm in ['MULDENS']:    
         _hparam('COMPUTE_BETA_TRAIN', True, lambda r: 10**r.uniform(-5, -3.5))
+        _hparam('MULDENS_inner_joint_training',True, lambda r: 10**r.uniform(-5, -3.5))
+        _hparam('MULDENS_random_init_feat', True, lambda r: r.randint(2,size=1))
     return hparams
 
 def default_hparams(algorithm, dataset):

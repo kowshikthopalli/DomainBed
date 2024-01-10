@@ -6,6 +6,7 @@ import json
 import os
 import random
 import sys
+sys.path.append("/usr/workspace/thopalli/2024/muldens_ensembles/domainbed")
 import time
 import uuid
 import copy
@@ -14,22 +15,24 @@ import PIL
 import torch
 import torchvision
 import torch.utils.data
-
 from domainbed import datasets_aug
+from domainbed import datasets
 from domainbed import hparams_registry
 from domainbed import algorithms
 from domainbed.lib import misc_aug,misc
 from domainbed.lib.fast_data_loader_aug import InfiniteDataLoader, FastDataLoader, UnNormalize
 from torchvision import transforms
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Domain generalization')
     parser.add_argument('--data_dir', type=str,default= 'DATA')
     parser.add_argument('--csv_root', type= str,default= 'PACS_splits/sketch/seed_12')
-    parser.add_argument('--dataset', type=str, default="DomainNet")
+    parser.add_argument('--dataset', type=str, default="CIFAR100Splits")
     parser.add_argument('--algorithm', type=str, default="MULDENS")
     parser.add_argument('--task', type=str, default="domain_generalization",
         help='domain_generalization | domain_adaptation')
-    parser.add_argument('--hparams', type=str,default= '{"batch_size":32,"data_augmentation":1}',
+    parser.add_argument('--hparams', type=json.loads,default= '{"batch_size":32,"data_augmentation":0}',
         help='JSON-serialized hparams dict')
     parser.add_argument('--hparams_seed', type=int, default=0,
         help='Seed for random hparams (0 means "default hparams")')
@@ -42,7 +45,7 @@ if __name__ == "__main__":
         help='Number of steps. Default is dataset-dependent.')
     parser.add_argument('--checkpoint_freq', type=int, default=None,
         help='Checkpoint every N steps. Default is dataset-dependent.')
-    parser.add_argument('--test_envs', type=int, nargs='+', default=[1])
+    parser.add_argument('--test_envs', type=int, nargs='+', default=[4])
     parser.add_argument('--output_dir', type=str, default="MULDENS_PACS_aug_debug")
     parser.add_argument('--holdout_fraction', type=float, default=0.2)
     parser.add_argument('--uda_holdout_fraction', type=float, default=0)
@@ -83,7 +86,11 @@ if __name__ == "__main__":
         hparams = hparams_registry.random_hparams(args.algorithm, args.dataset,
             misc_aug.seed_hash(args.hparams_seed, args.trial_seed))
     if args.hparams:
-        hparams.update(json.loads(args.hparams))
+
+        try:
+            hparams.update(json.loads(args.hparams))
+        except:
+            hparams.update(args.hparams)
 
     print('HParams:')
     for k, v in sorted(hparams.items()):
